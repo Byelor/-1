@@ -172,40 +172,29 @@ namespace ООТПиСП_1
         private void DrawResizeHandles(Graphics g, Shape shape)
         {
             if (shape == null) return;
-            RectangleF bounds = shape.GetBounds();
+            RectangleF localBounds = shape.GetLocalBounds();
             float handleSize = 8f / zoom;
-            PointF[] handlePositions;
-            // For triangle, place handles at bounds corners and midpoints of sides
-            if (shape is TriangleShape)
+            
+            float l = localBounds.Left;
+            float t = localBounds.Top;
+            float r = localBounds.Right;
+            float b = localBounds.Bottom;
+            float cx = (l + r) / 2f;
+            float cy = (t + b) / 2f;
+            
+            PointF[] localPositions = new PointF[]
             {
-                var tl = new PointF(bounds.Left, bounds.Top);
-                var tr = new PointF(bounds.Right, bounds.Top);
-                var bl = new PointF(bounds.Left, bounds.Bottom);
-                var br = new PointF(bounds.Right, bounds.Bottom);
-                var tm = new PointF((tl.X + tr.X) / 2f, (tl.Y + tr.Y) / 2f);
-                var bm = new PointF((bl.X + br.X) / 2f, (bl.Y + br.Y) / 2f);
-                var ml = new PointF((tl.X + bl.X) / 2f, (tl.Y + bl.Y) / 2f);
-                var mr = new PointF((tr.X + br.X) / 2f, (tr.Y + br.Y) / 2f);
-                // Order must match ResizeHandle enum: TL, TM, TR, ML, MR, BL, BM, BR
-                handlePositions = new[] { tl, tm, tr, ml, mr, bl, bm, br };
-            }
-            else
-            {
-                float halfW = bounds.Width / 2f;
-                float halfH = bounds.Height / 2f;
-                PointF[] localPositions = new PointF[]
-                {
-                    new PointF(-halfW, -halfH),
-                    new PointF(0, -halfH),
-                    new PointF(halfW, -halfH),
-                    new PointF(-halfW, 0),
-                    new PointF(halfW, 0),
-                    new PointF(-halfW, halfH),
-                    new PointF(0, halfH),
-                    new PointF(halfW, halfH)
-                };
-                handlePositions = localPositions.Select(p => shape.LocalToWorld(p)).ToArray();
-            }
+                new PointF(l, t),     // TL
+                new PointF(cx, t),    // TM
+                new PointF(r, t),     // TR
+                new PointF(l, cy),    // ML
+                new PointF(r, cy),    // MR
+                new PointF(l, b),     // BL
+                new PointF(cx, b),    // BM
+                new PointF(r, b)      // BR
+            };
+            PointF[] handlePositions = localPositions.Select(p => shape.LocalToWorld(p)).ToArray();
+
             using (var brush = new SolidBrush(Color.White))
             using (var pen = new Pen(Color.Black, 1))
             {
@@ -223,38 +212,29 @@ namespace ООТПиСП_1
         private ResizeHandle GetResizeHandleAtPoint(Shape shape, PointF worldPoint)
         {
             if (shape == null) return ResizeHandle.None;
-            RectangleF bounds = shape.GetBounds();
+            RectangleF localBounds = shape.GetLocalBounds();
             float handleSize = 10f / zoom;
-            PointF[] worldPositions;
-            if (shape is TriangleShape)
+            
+            float l = localBounds.Left;
+            float t = localBounds.Top;
+            float r = localBounds.Right;
+            float b = localBounds.Bottom;
+            float cx = (l + r) / 2f;
+            float cy = (t + b) / 2f;
+            
+            PointF[] localPositions = new PointF[]
             {
-                var tl = new PointF(bounds.Left, bounds.Top);
-                var tr = new PointF(bounds.Right, bounds.Top);
-                var bl = new PointF(bounds.Left, bounds.Bottom);
-                var br = new PointF(bounds.Right, bounds.Bottom);
-                var tm = new PointF((tl.X + tr.X) / 2f, (tl.Y + tr.Y) / 2f);
-                var bm = new PointF((bl.X + br.X) / 2f, (bl.Y + br.Y) / 2f);
-                var ml = new PointF((tl.X + bl.X) / 2f, (tl.Y + bl.Y) / 2f);
-                var mr = new PointF((tr.X + br.X) / 2f, (tr.Y + br.Y) / 2f);
-                worldPositions = new[] { tl, tm, tr, ml, mr, bl, bm, br };
-            }
-            else
-            {
-                float halfW = bounds.Width / 2f;
-                float halfH = bounds.Height / 2f;
-                PointF[] localPositions = new PointF[]
-                {
-                    new PointF(-halfW, -halfH),
-                    new PointF(0, -halfH),
-                    new PointF(halfW, -halfH),
-                    new PointF(-halfW, 0),
-                    new PointF(halfW, 0),
-                    new PointF(-halfW, halfH),
-                    new PointF(0, halfH),
-                    new PointF(halfW, halfH)
-                };
-                worldPositions = localPositions.Select(p => shape.LocalToWorld(p)).ToArray();
-            }
+                new PointF(l, t),     // TL
+                new PointF(cx, t),    // TM
+                new PointF(r, t),     // TR
+                new PointF(l, cy),    // ML
+                new PointF(r, cy),    // MR
+                new PointF(l, b),     // BL
+                new PointF(cx, b),    // BM
+                new PointF(r, b)      // BR
+            };
+            PointF[] worldPositions = localPositions.Select(p => shape.LocalToWorld(p)).ToArray();
+            
             for (int i = 0; i < worldPositions.Length; i++)
             {
                 if (IsPointNearHandle(worldPoint, worldPositions[i], handleSize))
@@ -1358,10 +1338,26 @@ namespace ООТПиСП_1
             var world = ScreenToWorld(e.Location);
             if (resizing && selectedShape != null)
             {
-                var currentLocal = selectedShape.WorldToLocal(world);
+                float dx = world.X - resizeOriginalAnchor.X;
+                float dy = world.Y - resizeOriginalAnchor.Y;
+                double ang = -selectedShape.Rotation * Math.PI / 180.0;
+                double cos = Math.Cos(ang);
+                double sin = Math.Sin(ang);
+                float nx = (float)(dx * cos - dy * sin);
+                float ny = (float)(dx * sin + dy * cos);
+                var currentLocal = new PointF(nx, ny);
+
                 RectangleF newLocalBounds = ComputeNewBounds(resizeStartLocalBounds, activeResizeHandle, currentLocal);
+                
                 var newLocalCenter = new PointF(newLocalBounds.Left + newLocalBounds.Width / 2f, newLocalBounds.Top + newLocalBounds.Height / 2f);
-                var newAnchorWorld = selectedShape.LocalToWorld(newLocalCenter);
+                
+                double ang2 = selectedShape.Rotation * Math.PI / 180.0;
+                double cos2 = Math.Cos(ang2);
+                double sin2 = Math.Sin(ang2);
+                float ax = (float)(newLocalCenter.X * cos2 - newLocalCenter.Y * sin2) + resizeOriginalAnchor.X;
+                float ay = (float)(newLocalCenter.X * sin2 + newLocalCenter.Y * cos2) + resizeOriginalAnchor.Y;
+                var newAnchorWorld = new PointF(ax, ay);
+
                 selectedShape.ResizeLocal(newLocalBounds, newAnchorWorld);
                 canvasPanel.Invalidate();
                 return;
