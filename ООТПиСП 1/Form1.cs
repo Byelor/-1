@@ -46,6 +46,7 @@ namespace ООТПиСП_1
         private System.Windows.Forms.Timer cursorTimer;
         private float resizeStartWidth = 0f;
         private float resizeStartHeight = 0f;
+        private RectangleF resizeStartLocalBounds;
         private GroupBox propertiesSizeGroupBox;
         private TableLayoutPanel propertiesSizeInputPanel;
         private List<TextBox> propertiesSizeTextBoxes = new List<TextBox>();
@@ -1272,8 +1273,9 @@ namespace ООТПиСП_1
                         {
                             resizing = true;
                             originalBounds = selectedShape.GetBounds();
-                        resizeOriginalAnchor = selectedShape.Anchor;
+                            resizeOriginalAnchor = selectedShape.Anchor;
                             resizeStartWorld = world;
+                            resizeStartLocalBounds = selectedShape.GetLocalBounds();
                             if (selectedShape is RectangleShape rs)
                             {
                                 resizeStartWidth = rs.Width;
@@ -1356,50 +1358,11 @@ namespace ООТПиСП_1
             var world = ScreenToWorld(e.Location);
             if (resizing && selectedShape != null)
             {
-                if (selectedShape is RectangleShape rs && Math.Abs(rs.Rotation) > 1e-3)
-                {
-                    var startLocal = rs.WorldToLocal(resizeStartWorld);
-                    var curLocal = rs.WorldToLocal(world);
-                    float dx = curLocal.X - startLocal.X;
-                    float dy = curLocal.Y - startLocal.Y;
-                    float newW = resizeStartWidth;
-                    float newH = resizeStartHeight;
-                    switch (activeResizeHandle)
-                    {
-                        case ResizeHandle.TopLeft:
-                            newW = resizeStartWidth - dx; newH = resizeStartHeight - dy; break;
-                        case ResizeHandle.TopMiddle:
-                            newH = resizeStartHeight - dy; break;
-                        case ResizeHandle.TopRight:
-                            newW = resizeStartWidth + dx; newH = resizeStartHeight - dy; break;
-                        case ResizeHandle.MiddleLeft:
-                            newW = resizeStartWidth - dx; break;
-                        case ResizeHandle.MiddleRight:
-                            newW = resizeStartWidth + dx; break;
-                        case ResizeHandle.BottomLeft:
-                            newW = resizeStartWidth - dx; newH = resizeStartHeight + dy; break;
-                        case ResizeHandle.BottomMiddle:
-                            newH = resizeStartHeight + dy; break;
-                        case ResizeHandle.BottomRight:
-                            newW = resizeStartWidth + dx; newH = resizeStartHeight + dy; break;
-                    }
-                    newW = Math.Max(newW, 10f);
-                    newH = Math.Max(newH, 10f);
-                    float cx = rs.Anchor.X;
-                    float cy = rs.Anchor.Y;
-                    rs.Width = newW;
-                    rs.Height = newH;
-                    var halfW = newW / 2f; var halfH = newH / 2f;
-                    var p0 = rs.LocalToWorld(new PointF(-halfW, -halfH));
-                    var p2 = rs.LocalToWorld(new PointF(halfW, halfH));
-                    var newBounds = new RectangleF(Math.Min(p0.X, p2.X), Math.Min(p0.Y, p2.Y), Math.Abs(p2.X - p0.X), Math.Abs(p2.Y - p0.Y));
-                    selectedShape.Resize(newBounds);
-                }
-                else
-                {
-                    RectangleF newBounds = ComputeNewBounds(originalBounds, activeResizeHandle, world);
-                    selectedShape.Resize(newBounds);
-                }
+                var currentLocal = selectedShape.WorldToLocal(world);
+                RectangleF newLocalBounds = ComputeNewBounds(resizeStartLocalBounds, activeResizeHandle, currentLocal);
+                var newLocalCenter = new PointF(newLocalBounds.Left + newLocalBounds.Width / 2f, newLocalBounds.Top + newLocalBounds.Height / 2f);
+                var newAnchorWorld = selectedShape.LocalToWorld(newLocalCenter);
+                selectedShape.ResizeLocal(newLocalBounds, newAnchorWorld);
                 canvasPanel.Invalidate();
                 return;
             }
@@ -1472,6 +1435,10 @@ namespace ООТПиСП_1
         {
             return new RectangleF(Anchor.X, Anchor.Y, 1, 1);
         }
+        public virtual RectangleF GetLocalBounds()
+        {
+            return new RectangleF(-0.5f, -0.5f, 1f, 1f);
+        }
         public PointF WorldToLocal(PointF p)
         {
             float dx = p.X - Anchor.X;
@@ -1495,6 +1462,10 @@ namespace ООТПиСП_1
         public virtual void Resize(RectangleF newBounds)
         {
             Anchor = new PointF(newBounds.X + newBounds.Width / 2, newBounds.Y + newBounds.Height / 2);
+        }
+        public virtual void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            Resize(newLocalBounds); // fallback to old implementation if not overridden
         }
         public virtual string[] GetSideLabels() => Array.Empty<string>();
         public virtual float[] GetCurrentSides() => Array.Empty<float>();
@@ -1539,11 +1510,21 @@ namespace ООТПиСП_1
         {
             return new RectangleF(Anchor.X - RadiusX, Anchor.Y - RadiusY, RadiusX * 2, RadiusY * 2);
         }
+        public override RectangleF GetLocalBounds()
+        {
+            return new RectangleF(-RadiusX, -RadiusY, RadiusX * 2, RadiusY * 2);
+        }
         public override void Resize(RectangleF newBounds)
         {
             RadiusX = Math.Max(newBounds.Width / 2f, 1f);
             RadiusY = Math.Max(newBounds.Height / 2f, 1f);
             Anchor = new PointF(newBounds.X + newBounds.Width / 2, newBounds.Y + newBounds.Height / 2);
+        }
+        public override void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            RadiusX = Math.Max(newLocalBounds.Width / 2f, 1f);
+            RadiusY = Math.Max(newLocalBounds.Height / 2f, 1f);
+            Anchor = newAnchorWorld;
         }
         public override string[] GetSideLabels() => new[] { "Радиус X:", "Радиус Y:" };
         public override float[] GetCurrentSides() => new[] { RadiusX, RadiusY };
@@ -1611,11 +1592,21 @@ namespace ООТПиСП_1
             float maxY = pts.Max(t => t.Y);
             return new RectangleF(minX, minY, maxX - minX, maxY - minY);
         }
+        public override RectangleF GetLocalBounds()
+        {
+            return new RectangleF(-Width / 2f, -Height / 2f, Width, Height);
+        }
         public override void Resize(RectangleF newBounds)
         {
             Width = newBounds.Width;
             Height = newBounds.Height;
             Anchor = new PointF(newBounds.X + newBounds.Width / 2, newBounds.Y + newBounds.Height / 2);
+        }
+        public override void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            Width = Math.Max(newLocalBounds.Width, 10f);
+            Height = Math.Max(newLocalBounds.Height, 10f);
+            Anchor = newAnchorWorld;
         }
         public override string[] GetSideLabels() => new[] { "Сторона 1 (низ):", "Сторона 2 (право):", "Сторона 3 (верх):", "Сторона 4 (лево):" };
         public override float[] GetCurrentSides() => new[] { Width, Height, Width, Height };
@@ -1705,6 +1696,14 @@ namespace ООТПиСП_1
             float maxY = pts.Max(pt => pt.Y);
             return new RectangleF(minX, minY, maxX - minX, maxY - minY);
         }
+        public override RectangleF GetLocalBounds()
+        {
+            float minX = localVerts.Min(pt => pt.X);
+            float minY = localVerts.Min(pt => pt.Y);
+            float maxX = localVerts.Max(pt => pt.X);
+            float maxY = localVerts.Max(pt => pt.Y);
+            return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+        }
         public override void Resize(RectangleF newBounds)
         {
             var old = GetBounds();
@@ -1713,6 +1712,23 @@ namespace ООТПиСП_1
             for (int i = 0; i < localVerts.Length; i++)
                 localVerts[i] = new PointF(localVerts[i].X * sx, localVerts[i].Y * sy);
             Anchor = new PointF(newBounds.X + newBounds.Width / 2, newBounds.Y + newBounds.Height / 2);
+        }
+        public override void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            var old = GetLocalBounds();
+            float sx = old.Width > 0 ? newLocalBounds.Width / old.Width : 1f;
+            float sy = old.Height > 0 ? newLocalBounds.Height / old.Height : 1f;
+            for (int i = 0; i < localVerts.Length; i++)
+            {
+                float nx = (localVerts[i].X - old.X) * sx + newLocalBounds.X;
+                float ny = (localVerts[i].Y - old.Y) * sy + newLocalBounds.Y;
+                localVerts[i] = new PointF(nx, ny);
+            }
+            float cx = localVerts.Average(p => p.X);
+            float cy = localVerts.Average(p => p.Y);
+            for (int i = 0; i < localVerts.Length; i++)
+                localVerts[i] = new PointF(localVerts[i].X - cx, localVerts[i].Y - cy);
+            Anchor = newAnchorWorld;
         }
         public override string[] GetSideLabels() => new[] { "Сторона a:", "Сторона b:", "Сторона c:" };
         public override float[] GetCurrentSides()
@@ -1789,6 +1805,11 @@ namespace ООТПиСП_1
             float maxY = pts.Max(pt => pt.Y);
             return new RectangleF(minX, minY, maxX - minX, maxY - minY);
         }
+        public override RectangleF GetLocalBounds()
+        {
+            float maxR = Radii.Max();
+            return new RectangleF(-maxR, -maxR, maxR * 2, maxR * 2);
+        }
         public override void Resize(RectangleF newBounds)
         {
             var old = GetBounds();
@@ -1796,6 +1817,14 @@ namespace ООТПиСП_1
             float sy = old.Height > 0 ? newBounds.Height / old.Height : 1f;
             for (int i = 0; i < 6; i++) Radii[i] = Math.Max(Radii[i] * Math.Max(sx, sy), 1f);
             Anchor = new PointF(newBounds.X + newBounds.Width / 2, newBounds.Y + newBounds.Height / 2);
+        }
+        public override void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            var old = GetLocalBounds();
+            float sx = old.Width > 0 ? newLocalBounds.Width / old.Width : 1f;
+            float sy = old.Height > 0 ? newLocalBounds.Height / old.Height : 1f;
+            for (int i = 0; i < 6; i++) Radii[i] = Math.Max(Radii[i] * Math.Max(sx, sy), 1f);
+            Anchor = newAnchorWorld;
         }
         public override string[] GetSideLabels() => new[] { "Радиус 1:", "Радиус 2:", "Радиус 3:", "Радиус 4:", "Радиус 5:", "Радиус 6:" };
         public override float[] GetCurrentSides()
@@ -1882,6 +1911,23 @@ namespace ООТПиСП_1
             float maxY = pts.Max(pt => pt.Y);
             return new RectangleF(minX, minY, maxX - minX, maxY - minY);
         }
+        public override RectangleF GetLocalBounds()
+        {
+            float halfBottom = BottomWidth / 2f;
+            float halfTop = TopWidth / 2f;
+            float leftOffset = (float)Math.Sqrt(Math.Max(LeftSide * LeftSide - Height * Height, 0f));
+            float rightOffset = (float)Math.Sqrt(Math.Max(RightSide * RightSide - Height * Height, 0f));
+            var p0 = new PointF(-halfBottom, Height / 2f);
+            var p1 = new PointF(halfBottom, Height / 2f);
+            var p2 = new PointF(halfTop - rightOffset, -Height / 2f);
+            var p3 = new PointF(-halfTop + leftOffset, -Height / 2f);
+            var pts = new[] { p0, p1, p2, p3 };
+            float minX = pts.Min(pt => pt.X);
+            float minY = pts.Min(pt => pt.Y);
+            float maxX = pts.Max(pt => pt.X);
+            float maxY = pts.Max(pt => pt.Y);
+            return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+        }
         public override void Resize(RectangleF newBounds)
         {
             var oldBounds = GetBounds();
@@ -1890,6 +1936,18 @@ namespace ООТПиСП_1
             float newAnchorX = newBounds.X + (Anchor.X - oldBounds.X) * scaleX;
             float newAnchorY = newBounds.Y + (Anchor.Y - oldBounds.Y) * scaleY;
             Anchor = new PointF(newAnchorX, newAnchorY);
+            BottomWidth *= scaleX;
+            TopWidth *= scaleX;
+            LeftSide *= Math.Max(scaleX, scaleY);
+            RightSide *= Math.Max(scaleX, scaleY);
+            Height *= scaleY;
+        }
+        public override void ResizeLocal(RectangleF newLocalBounds, PointF newAnchorWorld)
+        {
+            var oldBounds = GetLocalBounds();
+            float scaleX = oldBounds.Width > 0 ? newLocalBounds.Width / oldBounds.Width : 1f;
+            float scaleY = oldBounds.Height > 0 ? newLocalBounds.Height / oldBounds.Height : 1f;
+            Anchor = newAnchorWorld;
             BottomWidth *= scaleX;
             TopWidth *= scaleX;
             LeftSide *= Math.Max(scaleX, scaleY);
